@@ -36,14 +36,15 @@ void CBServer::init() {
 
     auto buffer = std::make_shared<std::array<char, 1024>>();
     auto endpoint = std::make_shared<asio::ip::udp::endpoint>();
+    auto do_receive = std::make_shared<std::function<void()>>(); // <--- shared_ptr
 
-    std::function<void()> do_receive;
-    do_receive = [this, buffer, endpoint, &do_receive]() {
+    *do_receive = [this, buffer, endpoint, do_receive]() {
         pImpl->socket.async_receive_from(
             asio::buffer(*buffer), *endpoint,
-            [this, buffer, endpoint, &do_receive](std::error_code ec, std::size_t bytes_recvd) {
+            [this, buffer, endpoint, do_receive](std::error_code ec, std::size_t bytes_recvd) {
                 if (!ec && bytes_recvd > 0) {
                     std::string msg(buffer->data(), bytes_recvd);
+
                     if (msg.rfind("REGISTER ", 0) == 0) {
                         std::string user = msg.substr(9);
                         {
@@ -57,20 +58,20 @@ void CBServer::init() {
                         if (space != std::string::npos) {
                             std::string to = msg.substr(8, space - 8);
                             std::string text = msg.substr(space + 1);
-                            if (pImpl->msg_cb) {
-                                pImpl->msg_cb(to, text);
-                            }
+                            if (pImpl->msg_cb) pImpl->msg_cb(to, text);
                         }
                     }
                 }
-        do_receive(); // loop again
+
+                (*do_receive)(); // recursive call safely via shared_ptr
             }
         );
     };
 
-    do_receive();
+    (*do_receive)();
     pImpl->io_thread = std::thread([this]() { pImpl->io.run(); });
 }
+
 
 void CBServer::shutdown() {
     pImpl->io.stop();
