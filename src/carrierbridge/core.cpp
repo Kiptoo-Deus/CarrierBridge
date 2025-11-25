@@ -70,7 +70,7 @@ void CBServer::shutdown() {
 }
 
 void CBServer::register_user(const std::string& username) {
-    asio::ip::udp::endpoint ep(asio::ip::make_address("127.0.0.1"), 9000);
+    asio::ip::udp::endpoint ep(asio::ip::make_address("127.0.0.1"), 9001);
 
     std::string msg = "REGISTER " + username;
     pImpl->socket.send_to(asio::buffer(msg), ep);
