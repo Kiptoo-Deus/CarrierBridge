@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package securecomm;
+
+message VPNConfig {
+    string server_address = 1;
+    uint32 server_port = 2;
+    bytes public_key = 3;
+    bytes private_key = 4;
+    repeated string allowed_ips = 5;
+    string dns_server = 6;
+    uint32 mtu = 7;
+    int64 config_timestamp = 8;
+}
+
+message VPNStatus {
+    bool connected = 1;
+    string server_endpoint = 2;
+    uint64 bytes_received = 3;
+    uint64 bytes_sent = 4;
+    int64 connection_duration = 5;
+    string client_ip = 6;
+    VPNConnectionState state = 7;
+}
+
+enum VPNConnectionState {
+    DISCONNECTED = 0;
+    CONNECTING = 1;
+    CONNECTED = 2;
+    RECONNECTING = 3;
+    ERROR = 4;
+}
+
+message VPNHandshake {
+    bytes client_public_key = 1;
+    bytes server_public_key = 2;
+    bytes pre_shared_key = 3;
+    int64 timestamp = 4;
+    bytes signature = 5;
+}

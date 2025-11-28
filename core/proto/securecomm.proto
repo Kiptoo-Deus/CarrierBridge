@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package securecomm;
+
+// Core message envelope for all communications
+message SecureEnvelope {
+    string message_id = 1;
+    bytes sender_public_key = 2;
+    bytes recipient_public_key = 3;
+    bytes encrypted_payload = 4;
+    bytes signature = 5;
+    int64 timestamp = 6;
+    MessageType message_type = 7;
+    bytes nonce = 8;
+    string version = 9;
+}
+
+enum MessageType {
+    TEXT_MESSAGE = 0;
+    VOICE_CALL_INITIATE = 1;
+    VOICE_CALL_ACCEPT = 2;
+    VOICE_CALL_REJECT = 3;
+    VOICE_CALL_DATA = 4;
+    FILE_TRANSFER_INIT = 5;
+    FILE_TRANSFER_DATA = 6;
+    FILE_TRANSFER_COMPLETE = 7;
+    PAYMENT_REQUEST = 8;
+    PAYMENT_RESPONSE = 9;
+    KEY_EXCHANGE = 10;
+    HEARTBEAT = 11;
+}
+
+message TextMessage {
+    string content = 1;
+    string reply_to_id = 2;
+    map<string, string> metadata = 3;
+}
+
+message VoiceCallData {
+    bytes encrypted_audio = 1;
+    uint32 sequence_number = 2;
+    uint32 timestamp = 3;
+    bool is_silence = 4;
+    string call_id = 5;
+}
+
+message FileTransfer {
+    string file_id = 1;
+    string filename = 2;
+    uint64 file_size = 3;
+    bytes chunk_data = 4;
+    uint32 chunk_index = 5;
+    uint32 total_chunks = 6;
+    string checksum = 7;
+}

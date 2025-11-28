@@ -1,0 +1,23 @@
+[package]
+name = "security-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+ring = "0.17"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+prost = "0.12"
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+
+[build-dependencies]
+prost-build = "0.12"
+
+[features]
+default = ["secure"]
+secure = ["ring"]
+ffi = []

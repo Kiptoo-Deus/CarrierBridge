@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package securecomm;
+
+message PaymentTransaction {
+    string transaction_id = 1;
+    string from_user = 2;
+    string to_user = 3;
+    uint64 amount = 4;
+    string currency = 5;
+    string description = 6;
+    bytes transaction_signature = 7;
+    int64 timestamp = 8;
+    PaymentStatus status = 9;
+    string reference_id = 10;
+}
+
+enum PaymentStatus {
+    PENDING = 0;
+    COMPLETED = 1;
+    FAILED = 2;
+    REVERSED = 3;
+    CANCELLED = 4;
+}
+
+message PaymentRequest {
+    string request_id = 1;
+    string from_user = 2;
+    string to_user = 3;
+    uint64 amount = 4;
+    string currency = 5;
+    string description = 6;
+    int64 expiry_time = 7;
+}
+
+message PaymentResponse {
+    string request_id = 1;
+    bool approved = 2;
+    string reason = 3;
+    bytes approval_signature = 4;
+}
