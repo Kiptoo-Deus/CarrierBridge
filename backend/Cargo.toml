@@ -6,7 +6,7 @@ description = "SecureComm backend - privacy-first communication platform"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
-libp2p = { version = "0.52", features = ["tcp", "tokio", "dns", "noise", "yamux"] }
+libp2p = { version = "0.52", features = ["tcp-tokio", "dns", "noise", "yamux", "identify"] }
 ring = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
