@@ -1,21 +1,19 @@
 #pragma once
 
 #include <vector>
-#include <string>
 #include <cstdint>
-#include <optional>
+#include <string>
 
 namespace securecomm {
 
 struct Envelope {
-    uint32_t version;
-    std::vector<uint8_t> ciphertext; // encrypted payload
-    std::vector<uint8_t> signature;  // signature by sender's device key
-    std::vector<uint8_t> aad;        
-
-    // Serialize to bytes for transport
-    std::vector<uint8_t> serialize() const;
-    static Envelope deserialize(const std::vector<uint8_t>&);
+    std::vector<uint8_t> session_id;
+    uint32_t message_index = 0;
+    uint32_t previous_counter = 0;
+    uint64_t timestamp = 0;
+    std::string sender_device_id;
+    std::vector<uint8_t> associated_data;
+    std::vector<uint8_t> ciphertext;
 };
 
-} 
+} // namespace securecomm

@@ -10,37 +10,26 @@ static std::vector<uint8_t> make_bytes(const std::string& s) {
 }
 
 int main() {
-    try {
-        Ratchet ratchet;
-        std::vector<uint8_t> root_key(32, 1);
-        ratchet.initialize(root_key);
+    std::cout << "Starting ratchet unit test (envelope)...\n";
 
-        std::vector<uint8_t> plaintext = make_bytes("Hello Ratchet!");
-        std::vector<uint8_t> aad = make_bytes("header");
+    std::vector<uint8_t> root_key(32, 2);
+    Ratchet a, b;
+    a.initialize(root_key);
+    b.initialize(root_key);
 
-        auto ciphertext = ratchet.encrypt(plaintext, aad);
-        auto decrypted = ratchet.decrypt(ciphertext, aad);
+    a.ratchet_step(b.dh_public_key());
+    b.ratchet_step(a.dh_public_key());
 
-        if (!decrypted.has_value() || decrypted.value() != plaintext) {
-            std::cerr << "Ratchet encrypt/decrypt failed\n";
-            return 1;
-        }
+    auto pt1 = make_bytes("test1");
+    Envelope e1 = a.encrypt_envelope(pt1);
+    auto r1 = b.decrypt_envelope(e1);
+    assert(r1.has_value() && r1.value() == pt1);
 
-        auto state = ratchet.export_state();
-        Ratchet ratchet2;
-        ratchet2.import_state(state);
+    auto pt2 = make_bytes("test2");
+    Envelope e2 = b.encrypt_envelope(pt2);
+    auto r2 = a.decrypt_envelope(e2);
+    assert(r2.has_value() && r2.value() == pt2);
 
-        auto ciphertext2 = ratchet2.encrypt(plaintext, aad);
-        auto decrypted2 = ratchet2.decrypt(ciphertext2, aad);
-        if (!decrypted2.has_value() || decrypted2.value() != plaintext) {
-            std::cerr << "Ratchet import/export failed\n";
-            return 2;
-        }
-
-        std::cout << "Ratchet skeleton unit test: OK\n";
-        return 0;
-    } catch (const std::exception& ex) {
-        std::cerr << "Exception: " << ex.what() << "\n";
-        return 10;
-    }
+    std::cout << "Ratchet unit test (envelope): OK\n";
+    return 0;
 }
