@@ -1,4 +1,5 @@
 #include "securecomm/transport.hpp"
+#include <iostream>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -13,19 +14,37 @@ public:
     ~InMemoryTransport() override { stop(); }
 
     void start() override {
+        std::cout << "InMemoryTransport::start() called" << std::endl;
+        
+        // Check if already running - make idempotent
+        bool expected = false;
+        if (!running_.compare_exchange_strong(expected, true)) {
+            std::cout << "Transport already started, skipping" << std::endl;
+            return;
+        }
+        
         running_ = true;
         worker_ = std::thread([this] {
+            std::cout << "Transport worker thread started" << std::endl;
             std::unique_lock<std::mutex> lk(mutex_);
             while (running_) {
                 cond_.wait(lk, [this]{ return !queue_.empty() || !running_; });
+                std::cout << "Transport worker woke up, queue size: " << queue_.size() << std::endl;
                 while (!queue_.empty()) {
                     auto msg = queue_.front(); queue_.pop();
                     lk.unlock();
-                    if (on_message_) on_message_(msg);
+                    if (on_message_) {
+                        std::cout << "Transport calling on_message callback" << std::endl;
+                        on_message_(msg);
+                    } else {
+                        std::cout << "Transport ERROR: on_message_ callback is null!" << std::endl;
+                    }
                     lk.lock();
                 }
             }
+            std::cout << "Transport worker thread exiting" << std::endl;
         });
+        std::cout << "InMemoryTransport::start() completed" << std::endl;
     }
 
     void stop() override {

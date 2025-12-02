@@ -1,6 +1,7 @@
 #include "securecomm/crypto.hpp"
 #include <sodium.h>
 #include <stdexcept>
+#include <optional>
 
 namespace securecomm {
 
