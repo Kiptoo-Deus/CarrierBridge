@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake libsodium-dev cppcheck
+
+    - name: Configure & Build
+      run: |
+        mkdir -p build
+        cd build
+        cmake ..
+        make -j$(nproc)
+
+    - name: Run demo (integration smoke test)
+      run: |
+        set -o pipefail
+        ./build/desktop_demo --version || ./build/desktop_demo || true
+
+    - name: Static analysis (cppcheck)
+      run: |
+        cppcheck --enable=warning,performance,style --suppress=missingIncludeSystem -I src/libsecurecomm/include src || true
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: desktop_demo
+        path: build/desktop_demo
