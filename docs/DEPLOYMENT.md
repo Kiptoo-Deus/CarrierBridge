@@ -135,10 +135,6 @@ GOOS=linux GOARCH=amd64 go build -o relay_server main.go
 - VPN: run dedicated WireGuard/IKEv2 gateway instances; keep them minimal and monitored
 - Mesh: enable discovery services with careful rate limiting to avoid DoS
 
----
 
-If you want, I can:
-- Generate a `Dockerfile` and `k8s` manifests tuned to your codebase
-- Create a GitHub Actions pipeline for building images and running tests
-- Add example WireGuard config and Mesh transport prototype
+
 
