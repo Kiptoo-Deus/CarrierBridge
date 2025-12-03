@@ -98,17 +98,23 @@ void Ratchet::hkdf_root_chain(const std::vector<uint8_t>& dh_shared_secret) {
                  root_key_.size(),
                  dh_shared_secret.data(), dh_shared_secret.size());
 
-    const unsigned char info[] = { 'R','a','t','c','h','e','t','C','h','a','i','n' };
-    uint8_t okm[32];
-    hkdf_expand(okm, sizeof(okm), prk, info, sizeof(info));
+    // Derive both send and receive chain keys deterministically
+    const unsigned char send_info[] = { 'S','e','n','d','C','h','a','i','n' };
+    const unsigned char recv_info[] = { 'R','e','c','v','C','h','a','i','n' };
+    uint8_t send_okm[32];
+    uint8_t recv_okm[32];
+    hkdf_expand(send_okm, sizeof(send_okm), prk, send_info, sizeof(send_info));
+    hkdf_expand(recv_okm, sizeof(recv_okm), prk, recv_info, sizeof(recv_info));
 
     root_key_ = std::vector<uint8_t>(prk, prk + crypto_auth_hmacsha256_BYTES);
-    send_chain_key_ = std::vector<uint8_t>(okm, okm + sizeof(okm));
+    send_chain_key_ = std::vector<uint8_t>(send_okm, send_okm + sizeof(send_okm));
+    recv_chain_key_ = std::vector<uint8_t>(recv_okm, recv_okm + sizeof(recv_okm));
 
     aead_.set_key(send_chain_key_);
 
     sodium_memzero(prk, sizeof(prk));
-    sodium_memzero(okm, sizeof(okm));
+    sodium_memzero(send_okm, sizeof(send_okm));
+    sodium_memzero(recv_okm, sizeof(recv_okm));
 }
 
 std::vector<uint8_t> Ratchet::dh_compute(const std::vector<uint8_t>& remote_public) const {
@@ -153,10 +159,9 @@ void Ratchet::ratchet_step(const std::vector<uint8_t>& remote_dh_public) {
     if (remote_dh_public.size() != crypto_scalarmult_BYTES) throw std::runtime_error("ratchet_step: invalid size");
     auto dh_shared = dh_compute(remote_dh_public);
 
-
     hkdf_root_chain(dh_shared);
 
-    recv_chain_key_ = send_chain_key_;
+    // hkdf_root_chain now sets both send_chain_key_ and recv_chain_key_
     aead_.set_key(recv_chain_key_);
 
     send_message_number_ = 0;
@@ -185,9 +190,10 @@ Envelope Ratchet::encrypt_envelope(const std::vector<uint8_t>& plaintext) {
     env.previous_counter = recv_message_number_;
     env.timestamp = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count());
-    env.sender_device_id = "device-0"; 
+    // Note: sender_device_id should be set by the Dispatcher before sending
     env.associated_data = header;
     env.ciphertext = ct;
+    
     send_chain_key_ = advance_chain_key(send_chain_key_);
     send_message_number_++;
     sodium_memzero(msg_key.data(), msg_key.size());
@@ -205,17 +211,24 @@ std::optional<std::vector<uint8_t>> Ratchet::decrypt_envelope(const Envelope& en
     size_t off = 0;
     try {
         uint32_t msg_num = read_u32_be(header, off);
-        if (off + crypto_scalarmult_BYTES > header.size()) return std::nullopt;
+        if (off + crypto_scalarmult_BYTES > header.size()) {
+            return std::nullopt;
+        }
         std::vector<uint8_t> remote_pub(header.begin() + off, header.begin() + off + crypto_scalarmult_BYTES);
-        if (last_remote_pub_.empty() || remote_pub != last_remote_pub_) {
+        
+        // Only perform DH ratchet if we've already seen a message from this remote
+        // (indicated by last_remote_pub_ not being empty)
+        if (!last_remote_pub_.empty() && remote_pub != last_remote_pub_) {
             auto dh_shared = dh_compute(remote_pub);
             hkdf_root_chain(dh_shared);
-            recv_chain_key_ = send_chain_key_;
             aead_.set_key(recv_chain_key_);
             recv_message_number_ = 0;
             last_remote_pub_ = remote_pub;
             sodium_memzero(dh_shared.data(), dh_shared.size());
+        } else if (last_remote_pub_.empty()) {
+            last_remote_pub_ = remote_pub;
         }
+        
         while (recv_message_number_ < msg_num) {
             auto sk = derive_message_key(recv_chain_key_);
             skipped_message_keys_.emplace(recv_message_number_, sk);
@@ -236,7 +249,9 @@ std::optional<std::vector<uint8_t>> Ratchet::decrypt_envelope(const Envelope& en
         auto msg_key = derive_message_key(recv_chain_key_);
         aead_.set_key(msg_key);
         auto pt_opt = aead_.decrypt(env.ciphertext, header);
-        if (!pt_opt.has_value()) return std::nullopt;
+        if (!pt_opt.has_value()) {
+            return std::nullopt;
+        }
         recv_chain_key_ = advance_chain_key(recv_chain_key_);
         recv_message_number_ = msg_num + 1;
 

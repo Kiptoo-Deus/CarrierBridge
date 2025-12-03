@@ -3,19 +3,26 @@
 #include <thread>
 #include <iostream>
 #include <chrono>
-#include <exception>
 
-extern "C" securecomm::Transport* create_inmemory_transport();
+// Use the connected transport factory functions
+extern "C" securecomm::Transport* create_inmemory_transport_a();
+extern "C" securecomm::Transport* create_inmemory_transport_b();
 
 int main() {
     try {
         std::cout << "Starting SecureComm demo..." << std::endl;
         
-        auto transport = std::shared_ptr<securecomm::Transport>(create_inmemory_transport());
-        std::cout << "Transport created" << std::endl;
+        // Create CONNECTED transports
+        // Use no-op deleters since the factories manage lifetime via global static
+        auto deleter = [](securecomm::Transport*){ /* no-op - static lifetime */ };
+        auto transportA = std::shared_ptr<securecomm::Transport>(create_inmemory_transport_a(), deleter);
+        auto transportB = std::shared_ptr<securecomm::Transport>(create_inmemory_transport_b(), deleter);
+        
+        std::cout << "Transports created: A=" << transportA.get() 
+                  << ", B=" << transportB.get() << std::endl;
 
-        auto dispatcherA = std::make_shared<securecomm::Dispatcher>(transport);
-        auto dispatcherB = std::make_shared<securecomm::Dispatcher>(transport);
+        auto dispatcherA = std::make_shared<securecomm::Dispatcher>(transportA);
+        auto dispatcherB = std::make_shared<securecomm::Dispatcher>(transportB);
         std::cout << "Dispatchers created" << std::endl;
 
         dispatcherA->register_device("alice");
@@ -32,14 +39,12 @@ int main() {
         std::cout << "Sessions created" << std::endl;
 
         dispatcherA->set_on_inbound([](const securecomm::Envelope& env){
-            auto pt = env.ciphertext;
-            std::string s(pt.begin(), pt.end());
+            std::string s(env.ciphertext.begin(), env.ciphertext.end());
             std::cout << "Alice inbound: " << s << "\n";
         });
 
         dispatcherB->set_on_inbound([](const securecomm::Envelope& env){
-            auto pt = env.ciphertext;
-            std::string s(pt.begin(), pt.end());
+            std::string s(env.ciphertext.begin(), env.ciphertext.end());
             std::cout << "Bob inbound: " << s << "\n";
         });
 
@@ -48,7 +53,7 @@ int main() {
         dispatcherB->send_message_to_device("alice", std::vector<uint8_t>({'H','i',' ','A','l','i','c','e'}));
 
         std::cout << "Waiting for messages..." << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::seconds(2));
 
         std::cout << "Stopping..." << std::endl;
         dispatcherA->stop();
