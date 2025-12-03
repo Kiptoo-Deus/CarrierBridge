@@ -44,8 +44,16 @@ add_executable(ratchet_test
 target_link_libraries(ratchet_test ${LIBSODIUM_LIBRARIES})
 add_test(NAME RatchetTest COMMAND ratchet_test)
 
+# Crypto unit tests
+add_executable(crypto_test
+    src/libsecurecomm/tests/crypto_test.cpp
+    src/libsecurecomm/src/crypto.cpp
+)
+target_link_libraries(crypto_test ${LIBSODIUM_LIBRARIES})
+add_test(NAME CryptoTest COMMAND crypto_test)
+
 
 message(STATUS "Build Configuration:")
 message(STATUS "  CMAKE_CXX_STANDARD: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  libsodium: ${LIBSODIUM_LIBRARIES}")
-message(STATUS "  Tests enabled: ratchet_test")
+message(STATUS "  Tests enabled: ratchet_test, crypto_test")
