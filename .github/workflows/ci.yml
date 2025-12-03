@@ -25,10 +25,21 @@ jobs:
         cmake ..
         make -j$(nproc)
 
+    - name: Run tests (ctest)
+      run: |
+        set -e
+        cd build
+        ctest --output-on-failure
+
     - name: Run demo (integration smoke test)
       run: |
         set -o pipefail
-        ./build/desktop_demo --version || ./build/desktop_demo || true
+        # Try to print version (if supported) then run demo as a smoke check
+        if [ -x ./build/desktop_demo ]; then
+          ./build/desktop_demo || true
+        else
+          echo "desktop_demo not built"
+        fi
 
     - name: Static analysis (cppcheck)
       run: |
