@@ -20,6 +20,12 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
+        externalNativeBuild {
+            cmake {
+                // Ensure C++17 and reasonable runtime flags for the local JNI stub
+                cppFlags += "-std=c++17 -fexceptions -frtti"
+            }
+        }
     }
 
     buildTypes {
@@ -44,11 +50,20 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.10.2"
+        }
+    }
+    
+    sourceSets {
+        getByName("main") {
+            // Include prebuilt native libraries from jniLibs
+            jniLibs.srcDirs("src/main/jniLibs")
         }
     }
 }
 
 dependencies {
+    implementation("com.squareup.okhttp3:okhttp:4.11.0")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
