@@ -43,6 +43,10 @@
         "tuple": "cpp",
         "type_traits": "cpp",
         "utility": "cpp",
-        "iostream": "cpp"
+        "iostream": "cpp",
+        "span": "cpp",
+        "ranges": "cpp",
+        "text_encoding": "cpp",
+        "thread": "cpp"
     }
 }
