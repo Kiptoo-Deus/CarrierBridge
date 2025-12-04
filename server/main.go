@@ -1,11 +1,14 @@
 package main
 
 import (
-	"crypto/rand"
+	cryptorand "crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"path"
@@ -19,17 +22,26 @@ import (
 
 var (
 	addr       = flag.String("addr", ":8080", "HTTP service address")
-	mpesaAPI   = flag.String("mpesa-api", "https://sandbox.safaricom.co.ke", "M-Pesa API endpoint")
+	mpesaAPI   = flag.String("mpesa-api", "https:
 	consumerKey = flag.String("consumer-key", "", "M-Pesa consumer key")
 	consumerSecret = flag.String("consumer-secret", "", "M-Pesa consumer secret")
 )
+
+
+func hashContact(contact string) string {
+	if contact == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(strings.ToLower(contact)))
+	return hex.EncodeToString(h[:])
+}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 type Message struct {
-	Type      string    `json:"type"`      // "message", "payment", "ack"
+	Type      string    `json:"type"`
 	MessageID string    `json:"message_id"`
 	SenderID  string    `json:"sender_id"`
 	Recipient string    `json:"recipient"`
@@ -38,7 +50,7 @@ type Message struct {
 }
 
 type PaymentRequest struct {
-	Type         string `json:"type"` // "stk_push"
+	Type         string `json:"type"`
 	PhoneNumber  string `json:"phone_number"`
 	Amount       int    `json:"amount"`
 	Reference    string `json:"reference"`
@@ -56,7 +68,7 @@ type Client struct {
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[string]*Client
-	queue   map[string][]Message // Offline message queue
+	queue   map[string][]Message
 }
 
 func NewHub() *Hub {
@@ -66,7 +78,6 @@ func NewHub() *Hub {
 	}
 }
 
-// Database helper functions -------------------------------------------------
 
 func ensureSchema(db *sql.DB) error {
 	stmts := []string{
@@ -74,9 +85,13 @@ func ensureSchema(db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			phone TEXT,
 			display_name TEXT,
+			email TEXT,
 			identity_pub BLOB,
 			signed_prekey BLOB,
-			token TEXT
+			token TEXT,
+			created_at INTEGER,
+			online INTEGER DEFAULT 0,
+			last_seen INTEGER
 		);`,
 		`CREATE TABLE IF NOT EXISTS one_time_prekeys (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +107,18 @@ func ensureSchema(db *sql.DB) error {
 			message_id TEXT,
 			timestamp INTEGER
 		);`,
+		`CREATE TABLE IF NOT EXISTS otp_requests (
+			phone TEXT PRIMARY KEY,
+			otp TEXT,
+			created_at INTEGER,
+			verified INTEGER DEFAULT 0
+		);`,
+		`CREATE TABLE IF NOT EXISTS email_verifications (
+			email TEXT PRIMARY KEY,
+			token TEXT,
+			created_at INTEGER,
+			verified INTEGER DEFAULT 0
+		);`,
 	}
 
 	for _, s := range stmts {
@@ -104,13 +131,13 @@ func ensureSchema(db *sql.DB) error {
 
 func genToken() (string, error) {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := cryptorand.Read(b); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// Simple user registration: stores identity keys and prekeys and returns a token
+
 func registerUser(db *sql.DB, id, phone, displayName string, identityPub, signedPrekey []byte, oneTimePrekeys [][]byte) (string, error) {
 	token, err := genToken()
 	if err != nil {
@@ -128,7 +155,7 @@ func registerUser(db *sql.DB, id, phone, displayName string, identityPub, signed
 		return "", err
 	}
 
-	// Insert one-time prekeys
+
 	for _, pk := range oneTimePrekeys {
 		if _, err := tx.Exec(`INSERT INTO one_time_prekeys (user_id, prekey) VALUES (?, ?)`, id, pk); err != nil {
 			return "", err
@@ -141,7 +168,7 @@ func registerUser(db *sql.DB, id, phone, displayName string, identityPub, signed
 	return token, nil
 }
 
-// Fetch and consume a single one-time prekey for a user (returns nil if none)
+
 func fetchOneTimePrekey(db *sql.DB, userID string) ([]byte, error) {
 	tx, err := db.Begin()
 	if err != nil {
@@ -187,7 +214,7 @@ func (h *Hub) register(client *Client) {
 	
 	log.Printf("[Hub] Client registered: %s", client.ID)
 	
-	// Deliver queued messages
+
 	if queued, ok := h.queue[client.ID]; ok {
 		log.Printf("[Hub] Delivering %d queued messages to %s", len(queued), client.ID)
 		for _, msg := range queued {
@@ -247,7 +274,7 @@ func (h *Hub) processMessage(data []byte) {
 	
 	msg.Timestamp = time.Now().Unix()
 	
-	// Handle payment requests
+
 	if msg.Type == "payment" {
 		var payment PaymentRequest
 		if err := json.Unmarshal(msg.Payload, &payment); err == nil {
@@ -256,10 +283,10 @@ func (h *Hub) processMessage(data []byte) {
 		return
 	}
 	
-	// Try to send immediately
+
 	msgData, _ := json.Marshal(msg)
 	if !h.send(msg.Recipient, msgData) {
-		// Queue for later delivery
+
 		h.queueMessage(msg)
 		log.Printf("[Hub] Message from %s to %s queued (offline)", msg.SenderID, msg.Recipient)
 	} else {
@@ -270,27 +297,20 @@ func (h *Hub) processMessage(data []byte) {
 func (h *Hub) processPayment(payment PaymentRequest, senderID string) {
 	log.Printf("[Hub] Processing payment: %+v from %s", payment, senderID)
 	
-	// Simulate M-Pesa STK Push
-	// In production, call actual M-Pesa API:
-	// POST https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest
-	// Headers: Authorization: Bearer <token>
-	// Body: {
-	//   "BusinessShortCode": "174379",
-	//   "Password": "<encoded>",
-	//   "Timestamp": "20191219102345",
-	//   "TransactionType": "CustomerPayBillOnline",
-	//   "Amount": "<amount>",
-	//   "PartyA": "<phone>",
-	//   "PartyB": "174379",
-	//   "PhoneNumber": "<phone>",
-	//   "CallBackURL": "<callback>",
-	//   "AccountReference": "<reference>",
-	//   "TransactionDesc": "<description>"
-	// }
+
+
+
+
+
+
+
+
+
+
 	
 	time.Sleep(2 * time.Second)
 	
-	// Send payment confirmation
+
 	response := map[string]interface{}{
 		"type":        "payment_confirmation",
 		"success":     true,
@@ -318,13 +338,13 @@ func (h *Hub) processPayment(payment PaymentRequest, senderID string) {
 }
 
 func serveWS(db *sql.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
-	// Authenticate using Authorization header: Bearer <token>
+
 	auth := r.Header.Get("Authorization")
 	var token string
 	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
 		token = strings.TrimSpace(auth[7:])
 	} else {
-		// fallback to token query param
+
 		token = r.URL.Query().Get("token")
 	}
 
@@ -351,7 +371,7 @@ func serveWS(db *sql.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
 		Send: make(chan []byte, 256),
 	}
 
-	// deliver persistent queued messages from DB
+
 	rows, err := db.Query(`SELECT recipient, sender, payload, type, message_id, timestamp FROM queued_messages WHERE recipient = ? ORDER BY id`, userID)
 	if err == nil {
 		var msgs []Message
@@ -376,7 +396,7 @@ func serveWS(db *sql.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			// delete delivered queued messages
+
 			if _, err := db.Exec(`DELETE FROM queued_messages WHERE recipient = ?`, userID); err != nil {
 				log.Printf("[Hub] Failed to delete queued messages for %s: %v", userID, err)
 			}
@@ -385,10 +405,10 @@ func serveWS(db *sql.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	hub.register(client)
 	
-	// Read pump
+
 	go func() {
 		defer func() {
-			hub.unregister(id)
+			hub.unregister(client.ID)
 			conn.Close()
 		}()
 		
@@ -402,11 +422,11 @@ func serveWS(db *sql.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
 				}
 				break
 			}
-			// Persist message if recipient offline
+
 			var msg Message
 			if err := json.Unmarshal(message, &msg); err == nil {
 				if !hub.send(msg.Recipient, message) {
-					// store persistently
+
 					if _, err := db.Exec(`INSERT INTO queued_messages (recipient, sender, payload, type, message_id, timestamp) VALUES (?, ?, ?, ?, ?, ?)`, msg.Recipient, msg.SenderID, msg.Payload, msg.Type, msg.MessageID, time.Now().Unix()); err != nil {
 						log.Printf("[Hub] Failed to persist queued message: %v", err)
 					}
@@ -416,7 +436,7 @@ func serveWS(db *sql.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	
-	// Write pump
+
 	go func() {
 		defer conn.Close()
 		
@@ -432,7 +452,7 @@ func serveWS(db *sql.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
     
-	// Open DB
+
 	dbPath := path.Join(".", "server.db")
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -450,7 +470,7 @@ func main() {
 		serveWS(db, hub, w, r)
 	})
 
-	// Registration endpoint
+
 	http.HandleFunc("/v1/register", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -492,7 +512,7 @@ func main() {
 		json.NewEncoder(w).Encode(resp)
 	})
 
-	// Keys endpoint: returns identity_pub, signed_prekey and a one-time prekey (consumed)
+
 	http.HandleFunc("/v1/keys/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -553,6 +573,359 @@ func main() {
 			"online_clients":  len(hub.clients),
 			"queued_messages": queued_count,
 			"timestamp":       time.Now().Unix(),
+		})
+	})
+
+
+	http.HandleFunc("/api/auth/register/phone", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		type phoneSignupReq struct {
+			Phone       string `json:"phone"`
+			DisplayName string `json:"display_name"`
+		}
+
+		var req phoneSignupReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		if req.Phone == "" {
+			http.Error(w, "phone is required", http.StatusBadRequest)
+			return
+		}
+
+
+		b := make([]byte, 4)
+		_, _ = cryptorand.Read(b)
+		otpNum := int((uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])) % 1000000)
+		if otpNum < 100000 {
+			otpNum += 100000
+		}
+		otp := fmt.Sprintf("%d", otpNum)
+
+
+		now := time.Now().Unix()
+		_, err := db.Exec(
+			`INSERT OR REPLACE INTO otp_requests (phone, otp, created_at, verified) VALUES (?, ?, ?, 0)`,
+			req.Phone, otp, now,
+		)
+		if err != nil {
+			log.Printf("[Auth] Failed to store OTP: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("[Auth] OTP for %s: %s", req.Phone, otp)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "ok",
+			"message": "OTP sent to phone (logged to server: " + otp + ")",
+		})
+	})
+
+
+	http.HandleFunc("/api/auth/verify/phone", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		type verifyPhoneReq struct {
+			Phone       string `json:"phone"`
+			OTP         string `json:"otp"`
+			DisplayName string `json:"display_name"`
+		}
+
+		var req verifyPhoneReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+
+		row := db.QueryRow(`SELECT otp, created_at FROM otp_requests WHERE phone = ?`, req.Phone)
+		var storedOTP string
+		var createdAt int64
+		err := row.Scan(&storedOTP, &createdAt)
+		if err != nil {
+			http.Error(w, "otp request not found", http.StatusBadRequest)
+			return
+		}
+
+
+		if time.Now().Unix()-createdAt > 300 {
+			http.Error(w, "otp expired", http.StatusBadRequest)
+			return
+		}
+
+		if storedOTP != req.OTP {
+			http.Error(w, "invalid otp", http.StatusBadRequest)
+			return
+		}
+
+
+		userID := "user_" + fmt.Sprintf("%d", time.Now().UnixNano())
+
+
+		token, err := genToken()
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = db.Exec(
+			`INSERT OR REPLACE INTO users (id, phone, display_name, token, created_at, online, last_seen) 
+			 VALUES (?, ?, ?, ?, ?, 0, ?)`,
+			userID, req.Phone, req.DisplayName, token, time.Now().Unix(), time.Now().Unix(),
+		)
+		if err != nil {
+			log.Printf("[Auth] Failed to create user: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+
+		db.Exec(`UPDATE otp_requests SET verified = 1 WHERE phone = ?`, req.Phone)
+
+		log.Printf("[Auth] User created: %s (phone: %s)", userID, req.Phone)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":      "ok",
+			"user_id":     userID,
+			"auth_token":  token,
+			"phone":       req.Phone,
+			"display_name": req.DisplayName,
+		})
+	})
+
+
+	http.HandleFunc("/api/auth/register/email", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		type emailSignupReq struct {
+			Email       string `json:"email"`
+			DisplayName string `json:"display_name"`
+		}
+
+		var req emailSignupReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		if req.Email == "" {
+			http.Error(w, "email is required", http.StatusBadRequest)
+			return
+		}
+
+
+		token, err := genToken()
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		now := time.Now().Unix()
+		_, err = db.Exec(
+			`INSERT OR REPLACE INTO email_verifications (email, token, created_at, verified) VALUES (?, ?, ?, 0)`,
+			req.Email, token, now,
+		)
+		if err != nil {
+			log.Printf("[Auth] Failed to store email verification: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("[Auth] Email verification token for %s: %s", req.Email, token)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "ok",
+			"message": "Verification link sent to email (token: " + token + ")",
+		})
+	})
+
+
+	http.HandleFunc("/api/auth/verify/email", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		type verifyEmailReq struct {
+			Email       string `json:"email"`
+			Token       string `json:"token"`
+			DisplayName string `json:"display_name"`
+		}
+
+		var req verifyEmailReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+
+		row := db.QueryRow(`SELECT token, created_at FROM email_verifications WHERE email = ?`, req.Email)
+		var storedToken string
+		var createdAt int64
+		err := row.Scan(&storedToken, &createdAt)
+		if err != nil {
+			http.Error(w, "email verification not found", http.StatusBadRequest)
+			return
+		}
+
+
+		if time.Now().Unix()-createdAt > 86400 {
+			http.Error(w, "verification token expired", http.StatusBadRequest)
+			return
+		}
+
+		if storedToken != req.Token {
+			http.Error(w, "invalid verification token", http.StatusBadRequest)
+			return
+		}
+
+
+		userID := "user_" + fmt.Sprintf("%d", time.Now().UnixNano())
+
+
+		authToken, err := genToken()
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = db.Exec(
+			`INSERT OR REPLACE INTO users (id, email, display_name, token, created_at, online, last_seen) 
+			 VALUES (?, ?, ?, ?, ?, 0, ?)`,
+			userID, req.Email, req.DisplayName, authToken, time.Now().Unix(), time.Now().Unix(),
+		)
+		if err != nil {
+			log.Printf("[Auth] Failed to create user: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+
+		db.Exec(`UPDATE email_verifications SET verified = 1 WHERE email = ?`, req.Email)
+
+		log.Printf("[Auth] User created: %s (email: %s)", userID, req.Email)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":      "ok",
+			"user_id":     userID,
+			"auth_token":  authToken,
+			"email":       req.Email,
+			"display_name": req.DisplayName,
+		})
+	})
+
+
+	http.HandleFunc("/api/contacts/discover", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+
+		auth := r.Header.Get("Authorization")
+		var token string
+		if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+			token = strings.TrimSpace(auth[7:])
+		}
+		if token == "" {
+			http.Error(w, "missing authorization", http.StatusUnauthorized)
+			return
+		}
+
+		userID, err := getUserByToken(db, token)
+		if err != nil || userID == "" {
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		type discoverReq struct {
+			HashedContacts []string `json:"hashed_contacts"`
+		}
+
+		var req discoverReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		if len(req.HashedContacts) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":   "ok",
+				"contacts": []interface{}{},
+			})
+			return
+		}
+
+
+		rows, err := db.Query(`SELECT id, phone, email, display_name, online, last_seen FROM users`)
+		if err != nil {
+			log.Printf("[Contacts] Failed to query users: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		type AvailableContact struct {
+			UserID      string `json:"user_id"`
+			DisplayName string `json:"display_name"`
+			Phone       string `json:"phone,omitempty"`
+			Email       string `json:"email,omitempty"`
+			Online      bool   `json:"online"`
+			LastSeen    int64  `json:"last_seen"`
+		}
+
+		var availableContacts []AvailableContact
+		for rows.Next() {
+			var id, phone, email, displayName string
+			var online int
+			var lastSeen int64
+			if err := rows.Scan(&id, &phone, &email, &displayName, &online, &lastSeen); err != nil {
+				continue
+			}
+
+
+			phoneHash := hashContact(phone)
+			emailHash := hashContact(email)
+
+			for _, hash := range req.HashedContacts {
+				if (phone != "" && phoneHash == hash) || (email != "" && emailHash == hash) {
+					availableContacts = append(availableContacts, AvailableContact{
+						UserID:      id,
+						DisplayName: displayName,
+						Phone:       phone,
+						Email:       email,
+						Online:      online != 0,
+						LastSeen:    lastSeen,
+					})
+					break
+				}
+			}
+		}
+
+		log.Printf("[Contacts] Discovery for %s found %d contacts", userID, len(availableContacts))
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "ok",
+			"contacts": availableContacts,
 		})
 	})
 	

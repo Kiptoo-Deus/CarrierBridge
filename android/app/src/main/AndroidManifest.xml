@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Network permission required for WebSocket/OkHttp -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- SMS Permissions for fallback transport (E2EE over cellular) -->
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />

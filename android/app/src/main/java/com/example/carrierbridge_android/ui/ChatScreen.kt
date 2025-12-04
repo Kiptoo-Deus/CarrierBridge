@@ -292,11 +292,8 @@ fun MessageBubbleWithState(msg: ChatMessage) {
 @Composable
 fun RecipientPickerDialog(
     currentRecipient: String,
-) {
-    // kept for backward compatibility
     onRecipientSelected: (String) -> Unit,
     onDismiss: () -> Unit
-)
 ) {
     // Legacy stub — this compose function is now replaced below by an overload.
     AlertDialog(
