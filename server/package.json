@@ -1,0 +1,13 @@
+{
+  "name": "carrierbrigde-server",
+  "version": "1.0.0",
+  "description": "Simple OTP and WebSocket server for CarrierBridge MVP",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  }
+}

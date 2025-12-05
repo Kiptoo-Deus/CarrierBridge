@@ -4,13 +4,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.remember
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.example.secure_carrier.ui.auth.AuthScreen
+import com.example.secure_carrier.ui.chat.ChatScreen
 import com.example.secure_carrier.ui.theme.Secure_CarrierTheme
 
 class MainActivity : ComponentActivity() {
@@ -19,29 +23,31 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             Secure_CarrierTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    val navController = rememberNavController()
+                    NavHost(navController = navController, startDestination = "auth") {
+                        composable("auth") {
+                            val vm: com.example.secure_carrier.ui.auth.AuthViewModel = viewModel()
+                            AuthScreen(viewModel = vm, onAuthSuccess = { navController.navigate("chat") })
+                        }
+                        composable("chat") {
+                            val vm: com.example.secure_carrier.ui.auth.AuthViewModel = viewModel()
+                            ChatScreen(authViewModel = vm)
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
 @Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
+fun PreviewMain() {
     Secure_CarrierTheme {
-        Greeting("Android")
+        GreetingPreview()
     }
 }
+
+@Composable
+fun GreetingPreview() {}

@@ -625,7 +625,8 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "ok",
-			"message": "OTP sent to phone (logged to server: " + otp + ")",
+			"otp":     otp,
+			"message": "OTP: " + otp,
 		})
 	})
 
