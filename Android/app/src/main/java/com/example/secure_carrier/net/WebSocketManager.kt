@@ -23,7 +23,11 @@ object WebSocketManager {
     private var socket: WebSocket? = null
 
     fun connect(token: String, onMessage: (String) -> Unit) {
-        val url = NetworkClient.baseUrl.replaceFirst("http", "ws") + "/ws?token=" + token
+        val baseUrl = NetworkClient.baseUrl
+        if (baseUrl == null) {
+            throw IllegalStateException("Server not discovered; cannot connect WebSocket")
+        }
+        val url = baseUrl.replaceFirst("http", "ws") + "/ws?token=" + token
         val req = Request.Builder().url(url).build()
         val listener = WSListener(onMessage)
         socket = client.newWebSocket(req, listener)

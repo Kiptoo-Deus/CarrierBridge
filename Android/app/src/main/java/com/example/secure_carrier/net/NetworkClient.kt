@@ -14,11 +14,21 @@ object NetworkClient {
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .build()
-    var baseUrl = "http://192.168.0.100:8080"
+    var baseUrl: String? = null
+        get() {
+            if (field == null) {
+                field = ServerDiscovery.discoverServer()
+                Log.d("NetworkClient", "Initialized baseUrl: $field")
+            }
+            return field
+        }
 
     fun postJson(path: String, json: JSONObject): JSONObject? {
         return try {
-            val url = baseUrl + path
+            val url = baseUrl?.let { it + path } ?: run {
+                Log.e("NetworkClient", "baseUrl is null; server discovery failed")
+                return null
+            }
             Log.d("NetworkClient", "POST to $url with body: $json")
             val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
             val req = Request.Builder().url(url).post(body).build()
@@ -41,5 +51,11 @@ object NetworkClient {
             Log.e("NetworkClient", "postJson error", e)
             null
         }
+    }
+
+    fun resetDiscovery() {
+        ServerDiscovery.clearCache()
+        baseUrl = null
+        Log.d("NetworkClient", "Discovery reset; will re-scan on next request")
     }
 }
