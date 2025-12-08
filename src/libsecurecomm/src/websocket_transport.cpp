@@ -1,5 +1,6 @@
 #include "securecomm/transport.hpp"
 #include <curl/curl.h>
+
 #include <thread>
 #include <mutex>
 #include <queue>
@@ -9,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <cstring>
 
 namespace securecomm {
 
@@ -33,7 +35,7 @@ static size_t curl_read_callback(void* ptr, size_t size, size_t nmemb, void* use
     }
     
     size_t to_copy = std::min(realsize, buffer->size());
-    std::memcpy(ptr, buffer->data(), to_copy);
+    memcpy(ptr, buffer->data(), to_copy);
     buffer->erase(buffer->begin(), buffer->begin() + to_copy);
     
     return to_copy;
