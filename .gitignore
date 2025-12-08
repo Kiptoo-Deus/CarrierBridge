@@ -1,3 +1,7 @@
+# Ignore build directory and CMake artifacts
+build/
+CMakeFiles/
+CMakeCache.txt
 # Rust
 target/
 *.rs.bk
