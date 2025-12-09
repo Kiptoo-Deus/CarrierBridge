@@ -39,20 +39,29 @@ fun ChatScreen(authViewModel: com.example.secure_carrier.ui.auth.AuthViewModel, 
     val userId = prefs.getString("user_id", null)
     var displayName = prefs.getString("display_name", null)
     if (displayName.isNullOrBlank()) {
-        // Generate a random display name: UserXXXX
         val randomDigits = (1000..9999).random()
         displayName = "User$randomDigits"
         prefs.edit().putString("display_name", displayName).apply()
     }
-    // Generate a random string for uniqueness (8 hex chars)
     val random = (1..8).map { ('a'..'f') + ('0'..'9') }.flatten().shuffled().take(8).joinToString("")
     val wsToken = if (userId != null && displayName != null) "$userId:$displayName:$random" else null
     var recipient by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
-    val messages = remember { mutableStateListOf<String>() }
+    data class ChatMessage(val text: String, val isSent: Boolean, val timestamp: Long, val senderName: String)
+    val messages = remember { mutableStateListOf<ChatMessage>() }
     data class OnlineUser(val userId: String, val displayName: String)
     val onlineUsers = remember { mutableStateListOf<OnlineUser>() }
     var expanded by remember { mutableStateOf(false) }
+
+    // Custom colors and typography
+    val primaryColor = androidx.compose.material3.MaterialTheme.colorScheme.primary
+    val surfaceColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
+    val onSurface = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+    val bubbleSent = androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer
+    val bubbleReceived = androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer
+    val bubbleTextSent = androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
+    val bubbleTextReceived = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer
+    val chatFont = androidx.compose.material3.MaterialTheme.typography.bodyLarge
 
     LaunchedEffect(wsToken) {
         wsToken?.let {
@@ -70,11 +79,19 @@ fun ChatScreen(authViewModel: com.example.secure_carrier.ui.auth.AuthViewModel, 
                                 onlineUsers.add(OnlineUser(userId, displayName))
                             }
                         }
+                    } else if (obj.optString("type") == "chat") {
+                        val sender = obj.optString("sender_id", "")
+                        val senderName = obj.optString("sender_name", sender)
+                        val payload = obj.optString("payload", "")
+                        val text = String(Base64.decode(payload, Base64.NO_WRAP))
+                        val ts = obj.optLong("timestamp", System.currentTimeMillis())
+                        val isSent = sender == userId
+                        messages.add(ChatMessage(text, isSent, ts, senderName))
                     } else {
-                        messages.add(msg)
+                        messages.add(ChatMessage(msg, false, System.currentTimeMillis(), "Server"))
                     }
                 } catch (e: Exception) {
-                    messages.add(msg)
+                    messages.add(ChatMessage(msg, false, System.currentTimeMillis(), "Server"))
                 }
             }
         }
@@ -82,25 +99,89 @@ fun ChatScreen(authViewModel: com.example.secure_carrier.ui.auth.AuthViewModel, 
 
     Column(
         modifier = Modifier
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(0.dp)
+            .fillMaxSize()
+            .background(surfaceColor),
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        androidx.compose.material3.Button(
-            onClick = { navController.navigate("settings") },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            androidx.compose.material3.Text("Settings")
-        }
-        Box(modifier = Modifier.height(240.dp).fillMaxWidth()) {
-            LazyColumn {
-                items(messages) { m ->
-                    Text(m, fontSize = 16.sp)
+        androidx.compose.material3.TopAppBar(
+            title = { Text("SecureComm", style = androidx.compose.material3.MaterialTheme.typography.titleLarge) },
+            colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = primaryColor)
+        )
+        Box(modifier = Modifier.weight(1f).fillMaxWidth().background(surfaceColor)) {
+            LazyColumn(
+                modifier = Modifier.padding(8.dp)
+            ) {
+                items(messages) { msg ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = if (msg.isSent) Arrangement.End else Arrangement.Start
+                    ) {
+                        if (!msg.isSent) {
+                            // Avatar placeholder for received messages
+                            androidx.compose.material3.Surface(
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                                color = bubbleReceived,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Text(
+                                    msg.senderName.take(1).uppercase(),
+                                    modifier = Modifier.align(Alignment.CenterVertically).padding(8.dp),
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                    color = bubbleTextReceived
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Column(
+                            horizontalAlignment = if (msg.isSent) Alignment.End else Alignment.Start
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (msg.isSent) bubbleSent else bubbleReceived,
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+                                    )
+                                    .shadow(2.dp, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Text(
+                                    msg.text,
+                                    style = chatFont,
+                                    color = if (msg.isSent) bubbleTextSent else bubbleTextReceived
+                                )
+                            }
+                            Text(
+                                "${msg.senderName} • " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(msg.timestamp)),
+                                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                color = onSurface,
+                                modifier = Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp)
+                            )
+                        }
+                        if (msg.isSent) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            // Avatar placeholder for sent messages
+                            androidx.compose.material3.Surface(
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                                color = bubbleSent,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Text(
+                                    displayName?.take(1)?.uppercase() ?: "M",
+                                    modifier = Modifier.align(Alignment.CenterVertically).padding(8.dp),
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                    color = bubbleTextSent
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
-        Text("Online Users:", modifier = Modifier.align(Alignment.Start))
+        Text("Online Users:", modifier = Modifier.align(Alignment.Start).padding(start = 16.dp, top = 8.dp), style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
         ExposedDropdownMenuBox(
             expanded = expanded,
             onExpandedChange = { expanded = !expanded }
@@ -109,7 +190,7 @@ fun ChatScreen(authViewModel: com.example.secure_carrier.ui.auth.AuthViewModel, 
                 value = recipient,
                 onValueChange = { recipient = it },
                 label = { Text("Recipient ID") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 readOnly = false,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
             )
@@ -132,7 +213,7 @@ fun ChatScreen(authViewModel: com.example.secure_carrier.ui.auth.AuthViewModel, 
             value = message,
             onValueChange = { message = it },
             label = { Text("Message") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
         )
         Button(
             onClick = {
@@ -141,17 +222,19 @@ fun ChatScreen(authViewModel: com.example.secure_carrier.ui.auth.AuthViewModel, 
                 obj.put("type", "chat")
                 obj.put("message_id", System.currentTimeMillis().toString())
                 obj.put("sender_id", userId)
+                obj.put("sender_name", displayName ?: "Me")
                 obj.put("recipient", recipient)
+                obj.put("timestamp", System.currentTimeMillis())
                 val payload = Base64.encodeToString(message.toByteArray(), Base64.NO_WRAP)
                 obj.put("payload", payload)
                 WebSocketManager.send(obj.toString())
-                messages.add("me → $recipient: $message")
+                messages.add(ChatMessage(message, true, System.currentTimeMillis(), displayName ?: "Me"))
                 message = ""
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            Text("Send")
+            Text("Send", style = androidx.compose.material3.MaterialTheme.typography.labelLarge)
         }
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
